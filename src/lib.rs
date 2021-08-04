@@ -257,13 +257,16 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let e: &dyn error::MyError = &ConcreteError {
-            name: "Bob".to_owned(),
+        let s = {
+            let e: &dyn error::MyError = &ConcreteError {
+                name: "Bob".to_owned(),
+            };
+            let s: String = e.context().unwrap();
+            assert_eq!(&s, "Hello!");
+            // Error, this must be getting &'static str - unsafe lifetime
+            let s: &str = e.context().unwrap();
+            s
         };
-        let s: String = e.context().unwrap();
-        assert_eq!(&s, "Hello!");
-        // Error, this must be getting &'static str - unsafe lifetime
-        let s: &str = e.context().unwrap();
         assert_eq!(s, "Bob");
         assert!(e.context::<i32>().is_none());
     }
