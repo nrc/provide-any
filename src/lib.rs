@@ -250,6 +250,47 @@ pub mod error {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct ConcreteError {
+        name: String,
+        array: Vec<String>,
+    }
+
+    impl error::MyError for ConcreteError {
+        fn provide_context<'a>(&'a self, result: &mut provider::TypeIdentifiedInit<'a>) {
+            // Can't reference s because it doesn't live long enough.
+            // let s = "foo".to_owned();
+            result
+                .set_if_uninit_with(|| "Hello!".to_owned())
+                .set_if_uninit_ref(&*self.name)
+                // .set_if_uninit_ref(&s)
+                .set_if_uninit_ref::<[String]>(&self.array)
+                .set_if_uninit_with(|| "Boo!");
+        }
+    }
+
+    #[test]
+    fn it_works() {
+        let e: &dyn error::MyError = &ConcreteError {
+            name: "Bob".to_owned(),
+            array: vec![],
+        };
+        let s: String = e.context().unwrap();
+        assert_eq!(&s, "Hello!");
+        assert!(e.context::<i32>().is_none());
+        let s: &str = e.context_ref::<str>().unwrap();
+        assert_eq!(s, "Bob");
+        let a: &[String] = e.context_ref().unwrap();
+        assert_eq!(a.len(), 0);
+        let s = e.context::<&str>().unwrap();
+        assert_eq!(s, "Boo!");
+    }
+}
+
 pub mod dyno {
     use core::any::TypeId;
     use core::marker::PhantomData;
@@ -514,7 +555,7 @@ pub mod dyno2 {
 }
 
 pub mod dyno2_provider {
-    use crate::dyno2::{Optional, Tag, TagValue, Tagged};
+    use crate::dyno2::{Optional, Ref, Tag, TagValue, Tagged, Value};
 
     /// Implementation detail shared between `Request<'a>` and `ConcreteRequest<'a, I>`.
     ///
@@ -565,6 +606,26 @@ pub mod dyno2_provider {
             }
             self
         }
+
+        /// nrc extension.
+        pub fn provide_value<T, F>(&mut self, f: F) -> &mut Self
+        where
+            T: 'static,
+            F: FnOnce() -> T,
+        {
+            if let Some(res @ TagValue(None)) = self.tagged.downcast_mut::<Optional<Value<T>>>() {
+                res.0 = Some(f());
+            }
+            self
+        }
+
+        /// nrc extension.
+        pub fn provide_ref<T: ?Sized + 'static>(&mut self, value: &'a T) -> &mut Self {
+            if let Some(res @ TagValue(None)) = self.tagged.downcast_mut::<Optional<Ref<T>>>() {
+                res.0 = Some(value);
+            }
+            self
+        }
     }
 
     impl<'a, I> ConcreteRequest<'a, I>
@@ -605,7 +666,7 @@ pub mod dyno2_provider {
 }
 
 pub mod dyno2_error {
-    use crate::dyno2::Tag;
+    use crate::dyno2::{Ref, Tag, Value};
     use crate::dyno2_provider::{ConcreteRequest, Provider, Request};
     use core::fmt::Debug;
 
@@ -620,7 +681,7 @@ pub mod dyno2_error {
     }
 
     impl dyn MyError {
-        pub fn context<'a, I>(&'a self) -> Option<I::Type>
+        pub fn context_by_type_tag<'a, I>(&'a self) -> Option<I::Type>
         where
             I: Tag<'a>,
         {
@@ -628,6 +689,56 @@ pub mod dyno2_error {
             self.provide(&mut request);
             request.take()
         }
+
+        pub fn context_value<T: 'static>(&self) -> Option<T> {
+            let mut request = <ConcreteRequest<'_, Value<T>>>::new();
+            self.provide(&mut request);
+            request.take()
+        }
+
+        pub fn context_ref<'a, T: ?Sized + 'static>(&'a self) -> Option<&'a T> {
+            let mut request = <ConcreteRequest<'a, Ref<T>>>::new();
+            self.provide(&mut request);
+            request.take()
+        }
+    }
+}
+
+#[cfg(test)]
+mod dyno2_tests {
+    use crate::dyno2;
+    use crate::dyno2_error::*;
+    use crate::dyno2_provider::Request;
+
+    #[derive(Debug)]
+    pub struct ConcreteError {
+        name: String,
+        array: Vec<String>,
+    }
+
+    impl MyError for ConcreteError {
+        fn provide_context<'a>(&'a self, result: &mut Request<'a>) {
+            result
+                .provide_value(|| "Hello!".to_owned())
+                .provide_ref(&*self.name);
+        }
+    }
+
+    #[test]
+    fn it_works() {
+        let e: &dyn MyError = &ConcreteError {
+            name: "Bob".to_owned(),
+            array: vec![],
+        };
+        let s: String = e.context_value().unwrap();
+        assert_eq!(&s, "Hello!");
+        assert!(e.context_by_type_tag::<dyno2::Value<i32>>().is_none());
+        let s: &str = e.context_ref().unwrap();
+        assert_eq!(s, "Bob");
+        // let a: &[String] = e.context_ref().unwrap();
+        // assert_eq!(a.len(), 0);
+        // let s = e.context::<dyno2::Ref<str>>().unwrap();
+        // assert_eq!(s, "Boo!");
     }
 }
 
@@ -769,84 +880,5 @@ mod dyno_tests {
         };
         let s: &str = e.context::<dyno::Ref<str>>().unwrap();
         assert_eq!(s, "Bob");
-    }
-}
-
-#[cfg(test)]
-mod dyno2_tests {
-    use crate::dyno2;
-    use crate::dyno2_error::*;
-    use crate::dyno2_provider::Request;
-
-    #[derive(Debug)]
-    pub struct ConcreteError {
-        name: String,
-        array: Vec<String>,
-    }
-
-    impl MyError for ConcreteError {
-        fn provide_context<'a>(&'a self, result: &mut Request<'a>) {
-            result
-                //.provide_with::<dyno2::Value<String>, _>(|| "Hello!".to_owned())
-                .provide::<dyno2::Ref<str>>(&*self.name);
-        }
-    }
-
-    #[test]
-    fn it_works() {
-        let e: &dyn MyError = &ConcreteError {
-            name: "Bob".to_owned(),
-            array: vec![],
-        };
-        // let s: String = e.context::<dyno2::Value<String>>().unwrap();
-        // assert_eq!(&s, "Hello!");
-        assert!(e.context::<dyno2::Value<i32>>().is_none());
-        let s: &str = e.context::<dyno2::Ref<str>>().unwrap();
-        assert_eq!(s, "Bob");
-        // let a: &[String] = e.context_ref().unwrap();
-        // assert_eq!(a.len(), 0);
-        // let s = e.context::<dyno2::Ref<str>>().unwrap();
-        // assert_eq!(s, "Boo!");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug)]
-    pub struct ConcreteError {
-        name: String,
-        array: Vec<String>,
-    }
-
-    impl error::MyError for ConcreteError {
-        fn provide_context<'a>(&'a self, result: &mut provider::TypeIdentifiedInit<'a>) {
-            // Can't reference s because it doesn't live long enough.
-            // let s = "foo".to_owned();
-            result
-                .set_if_uninit_with(|| "Hello!".to_owned())
-                .set_if_uninit_ref(&*self.name)
-                // .set_if_uninit_ref(&s)
-                .set_if_uninit_ref::<[String]>(&self.array)
-                .set_if_uninit_with(|| "Boo!");
-        }
-    }
-
-    #[test]
-    fn it_works() {
-        let e: &dyn error::MyError = &ConcreteError {
-            name: "Bob".to_owned(),
-            array: vec![],
-        };
-        let s: String = e.context().unwrap();
-        assert_eq!(&s, "Hello!");
-        assert!(e.context::<i32>().is_none());
-        let s: &str = e.context_ref::<str>().unwrap();
-        assert_eq!(s, "Bob");
-        let a: &[String] = e.context_ref().unwrap();
-        assert_eq!(a.len(), 0);
-        let s = e.context::<&str>().unwrap();
-        assert_eq!(s, "Boo!");
     }
 }
