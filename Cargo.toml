@@ -1,8 +1,8 @@
-[package]
-name = "my-any"
-version = "0.1.0"
-edition = "2018"
+cargo-features = ["edition2021"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package]
+name = "provide-any"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
