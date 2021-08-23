@@ -1,138 +1,11 @@
-#![feature(core_intrinsics)]
-#![feature(const_type_id)]
-#![feature(const_type_name)]
 #![allow(incomplete_features)]
+// We use trait upcasting in the implementation, it just makes things easier though, we can live
+// without it.
 #![feature(trait_upcasting)]
 
-/// https://doc.rust-lang.org/nightly/std/any/index.html
-pub mod any {
-    use core::fmt;
-    use core::intrinsics;
-
-    pub trait Any: 'static {
-        fn type_id(&self) -> TypeId;
-    }
-
-    impl<T: 'static + ?Sized> Any for T {
-        fn type_id(&self) -> TypeId {
-            TypeId::of::<T>()
-        }
-    }
-
-    impl fmt::Debug for dyn Any {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Any").finish_non_exhaustive()
-        }
-    }
-
-    impl fmt::Debug for dyn Any + Send {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Any").finish_non_exhaustive()
-        }
-    }
-
-    impl fmt::Debug for dyn Any + Send + Sync {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Any").finish_non_exhaustive()
-        }
-    }
-
-    impl dyn Any {
-        #[inline]
-        pub fn is<T: Any>(&self) -> bool {
-            // Get `TypeId` of the type this function is instantiated with.
-            let t = TypeId::of::<T>();
-
-            // Get `TypeId` of the type in the trait object (`self`).
-            let concrete = self.type_id();
-
-            // Compare both `TypeId`s on equality.
-            t == concrete
-        }
-
-        #[inline]
-        pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-            if self.is::<T>() {
-                // SAFETY: just checked whether we are pointing to the correct type, and we can rely on
-                // that check for memory safety because we have implemented Any for all types; no other
-                // impls can exist as they would conflict with our impl.
-                unsafe { Some(&*(self as *const dyn Any as *const T)) }
-            } else {
-                None
-            }
-        }
-
-        #[inline]
-        pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
-            if self.is::<T>() {
-                // SAFETY: just checked whether we are pointing to the correct type, and we can rely on
-                // that check for memory safety because we have implemented Any for all types; no other
-                // impls can exist as they would conflict with our impl.
-                unsafe { Some(&mut *(self as *mut dyn Any as *mut T)) }
-            } else {
-                None
-            }
-        }
-    }
-
-    impl dyn Any + Send {
-        #[inline]
-        pub fn is<T: Any>(&self) -> bool {
-            <dyn Any>::is::<T>(self)
-        }
-
-        #[inline]
-        pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-            <dyn Any>::downcast_ref::<T>(self)
-        }
-
-        #[inline]
-        pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
-            <dyn Any>::downcast_mut::<T>(self)
-        }
-    }
-
-    impl dyn Any + Send + Sync {
-        #[inline]
-        pub fn is<T: Any>(&self) -> bool {
-            <dyn Any>::is::<T>(self)
-        }
-
-        #[inline]
-        pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-            <dyn Any>::downcast_ref::<T>(self)
-        }
-
-        pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
-            <dyn Any>::downcast_mut::<T>(self)
-        }
-    }
-
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-    pub struct TypeId {
-        t: u64,
-    }
-
-    impl TypeId {
-        pub const fn of<T: ?Sized + 'static>() -> TypeId {
-            TypeId {
-                t: intrinsics::type_id::<T>(),
-            }
-        }
-    }
-
-    pub const fn type_name<T: ?Sized>() -> &'static str {
-        intrinsics::type_name::<T>()
-    }
-
-    pub const fn type_name_of_val<T: ?Sized>(_val: &T) -> &'static str {
-        type_name::<T>()
-    }
-}
-
-/// https://github.com/mystor/dyno/tree/min_magic
-pub mod typed_provider {
-    use crate::any::TypeId;
+/// Adapted from https://github.com/mystor/dyno/tree/min_magic
+pub mod provide_any {
+    use core::any::TypeId;
 
     /// This trait is implemented by specific `TypeTag` types in order to allow
     /// describing a type which can be requested for a given lifetime `'a`.
@@ -181,8 +54,35 @@ pub mod typed_provider {
 
     /// An untyped request for a tagged value of a specific type.
     pub struct Requisition<'a, 'b>(&'b mut RequisitionImpl<dyn Tagged<'a> + 'a>);
-    // TODO is this useful? What about a Send or Sync version?
-    // pub struct SendRequisition<'a, 'b>(&'b mut RequisitionImpl<dyn Tagged<'a> + 'a + Sync>);
+    // TODO are these useful?
+    pub struct SendRequisition<'a, 'b>(&'b mut RequisitionImpl<dyn Tagged<'a> + 'a + Send>);
+    pub struct SyncRequisition<'a, 'b>(&'b mut RequisitionImpl<dyn Tagged<'a> + 'a + Sync>);
+    pub struct SendSyncRequisition<'a, 'b>(&'b mut RequisitionImpl<dyn Tagged<'a> + 'a + Send + Sync>);
+
+    #[allow(dead_code)]
+    #[allow(unused_variables)]
+    mod auto_trait_assert {
+        use super::*;
+
+        fn assert_send(x: impl Send) {}
+        fn assert_sync(x: impl Sync) {}
+        fn req_auto<'a, 'b>(r: Requisition<'a, 'b>) {
+            // assert_send(r);
+            // assert_sync(r);
+        }
+        fn send_req_auto<'a, 'b>(r: SendRequisition<'a, 'b>) {
+            assert_send(r);
+            // assert_sync(r);
+        }
+        fn sync_req_auto<'a, 'b>(r: SyncRequisition<'a, 'b>) {
+            // assert_send(r);
+            assert_sync(r);
+        }
+        fn send_sync_req_auto<'a, 'b>(r1: SendSyncRequisition<'a, 'b>, r2: SendSyncRequisition<'a, 'b>) {
+            assert_send(r1);
+            assert_sync(r2);
+        }
+    }
 
     impl<'a, 'b> Requisition<'a, 'b> {
         /// Attempts to provide a value with the given `TypeTag` to the request.
@@ -324,7 +224,7 @@ pub mod typed_provider {
 }
 
 pub mod error {
-    use crate::typed_provider::{request_by_type_tag, tags, Provider, Requisition, TypeTag};
+    use crate::provide_any::{request_by_type_tag, tags, Provider, Requisition, TypeTag};
     use core::fmt::Debug;
 
     pub trait Error: Debug + Provider {
@@ -355,7 +255,7 @@ pub mod error {
 #[cfg(test)]
 mod tests {
     use crate::error::*;
-    use crate::typed_provider::{tags, Requisition};
+    use crate::provide_any::{tags, Requisition};
 
     #[derive(Debug)]
     pub struct ConcreteError {
