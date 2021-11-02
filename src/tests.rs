@@ -10,10 +10,11 @@ pub struct ConcreteError {
 
 impl Error for ConcreteError {
     fn provide_context<'a>(&'a self, mut req: Requisition<'a, '_>) {
-        // Provide a `String` value (a temporary value) and a `&str` reference (references a field
-        // of `self`).
-        req.provide_value(|| "Hello!".to_owned())
-            .provide_ref(&*self.name);
+        // Provide a `String` value (a temporary value), a `&str` reference (references a field
+        // of `self`), and a slice of `String`s.
+        req.provide_value::<String, _>(|| "Hello!".to_owned())
+            .provide_ref::<str>(&*self.name)
+            .provide_ref::<[String]>(&*self.array);
     }
 }
 
@@ -21,7 +22,7 @@ impl Error for ConcreteError {
 fn access_context() {
     let e: &dyn Error = &ConcreteError {
         name: "Bob".to_owned(),
-        array: vec![],
+        array: vec!["Alice".to_owned()],
     };
 
     // Get context by value.
@@ -31,6 +32,10 @@ fn access_context() {
     // Get context by reference.
     let s: &str = e.get_context_ref().unwrap();
     assert_eq!(s, "Bob");
+
+    // Get context by reference.
+    let s: &[String] = e.get_context_ref().unwrap();
+    assert_eq!(s, &*vec!["Alice".to_owned()]);
 
     // Use the fully-general API to get an `i32`, this operation fails since `ConcreteError` does
     // not provide `i32` context.
