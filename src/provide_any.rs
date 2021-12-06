@@ -101,6 +101,13 @@ pub mod tags {
     impl<'a, I: TypeTag<'a>> TypeTag<'a> for Optional<I> {
         type Type = Option<I::Type>;
     }
+
+    /// Tag combinator to wrap the given tag's value in an `Result<T, E>`
+    pub struct ResultTag<I, E>(PhantomData<I>, PhantomData<E>);
+
+    impl<'a, I: TypeTag<'a>, E: TypeTag<'a>> TypeTag<'a> for ResultTag<I, E> {
+        type Type = Result<I::Type, E::Type>;
+    }
 }
 
 /// A helper object for providing objects by type.
