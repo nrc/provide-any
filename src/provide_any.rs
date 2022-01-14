@@ -36,7 +36,7 @@ use core::any::TypeId;
 pub trait Provider {
     /// Object providers should implement this method to provide *all* values they are able to
     /// provide using `req`.
-    fn provide<'a>(&'a self, req: Requisition<'a, '_>);
+    fn provide<'a>(&'a self, req: &mut Requisition<'a, '_>);
 }
 
 /// Request a specific value by a given tag from the `Provider`.
@@ -47,7 +47,7 @@ where
     let mut req: ConcreteRequisition<'a, I> = RequisitionImpl {
         tagged: TagValue(None),
     };
-    provider.provide(Requisition(&mut req));
+    provider.provide(&mut Requisition(&mut req));
     req.tagged.0
 }
 

@@ -4,13 +4,13 @@ use core::fmt::Debug;
 // Replaces `std::error::Error`, note the additional `Provider` trait bound.
 pub trait Error: Debug + Provider {
     // Optional method for implementers to provide additional context.
-    fn provide_context<'a>(&'a self, _req: Requisition<'a, '_>) {}
+    fn provide_context<'a>(&'a self, _req: &mut Requisition<'a, '_>) {}
 }
 
 // Blanket impl of `Provider` so that the bound is backwards compatible and implementers do not
 // need to be aware of the `provide_any` API.
 impl<T: Error> Provider for T {
-    fn provide<'a>(&'a self, req: Requisition<'a, '_>) {
+    fn provide<'a>(&'a self, req: &mut Requisition<'a, '_>) {
         // Delegate to `Error::provide_context`
         self.provide_context(req);
     }
