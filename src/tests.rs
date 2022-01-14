@@ -14,7 +14,7 @@ impl<'a> TypeTag<'a> for SuggestionTag {
 }
 
 impl Error for ConcreteError {
-    fn provide_context<'a>(&'a self, req: &mut Requisition<'a, '_>) {
+    fn provide_context<'a>(&'a self, req: &mut Requisition<'a>) {
         // Provide a `String` value (a temporary value), a `&str` reference (references a field
         // of `self`), and a slice of `String`s.
         req.provide_value::<String, _>(|| "Hello!".to_owned())
