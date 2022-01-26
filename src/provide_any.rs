@@ -37,6 +37,7 @@ pub trait Provider {
     /// Object providers should implement this method to provide *all* values they are able to
     /// provide using `req`.
     fn provide<'a>(&'a self, req: &mut Requisition<'a>);
+    fn provide_mut<'a>(&'a mut self, _req: &mut Requisition<'a>) {}
 }
 
 /// Request a specific value by a given tag from the `Provider`.
@@ -48,6 +49,17 @@ where
         tagged: TagValue(None),
     };
     provider.provide(&mut req);
+    req.tagged.0
+}
+
+pub fn request_mut_by_type_tag<'a, I>(provider: &'a mut dyn Provider) -> Option<I::Type>
+where
+    I: TypeTag<'a>,
+{
+    let mut req: ConcreteRequisition<'a, I> = RequisitionImpl {
+        tagged: TagValue(None),
+    };
+    provider.provide_mut(&mut req);
     req.tagged.0
 }
 
@@ -128,6 +140,10 @@ impl<'a> Requisition<'a> {
     /// Provide a reference, note that the referee type must be bounded by `'static`, but may be unsized.
     pub fn provide_ref<T: ?Sized + 'static>(&mut self, value: &'a T) -> &mut Self {
         self.provide::<tags::Ref<T>>(value)
+    }
+
+    pub fn provide_mut<T: ?Sized + 'static>(&mut self, value: &'a mut T) -> &mut Self {
+        self.provide::<tags::RefMut<T>>(value)
     }
 
     /// Provide a value with the given `TypeTag`.
@@ -222,4 +238,3 @@ impl<'a> dyn Tagged<'a> {
         }
     }
 }
-
