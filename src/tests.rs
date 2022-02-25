@@ -18,6 +18,7 @@ impl Error for ConcreteError {
         // Provide a `String` value (a temporary value), a `&str` reference (references a field
         // of `self`), and a slice of `String`s.
         req.provide_value::<String, _>(|| "Hello!".to_owned())
+            .provide_value::<Vec<String>, _>(|| self.array.clone())
             .provide::<SuggestionTag>(&*self.name)
             .provide_ref::<[String]>(&*self.array);
     }
@@ -45,6 +46,8 @@ fn access_context() {
     // Use the fully-general API to get an `i32`, this operation fails since `ConcreteError` does
     // not provide `i32` context.
     assert!(e.get_context_by_type_tag::<tags::Value<i32>>().is_none());
+
+    let _: Vec<String> = e.get_context().unwrap();
 }
 
 // Implement Provider from a non-core crate.
@@ -73,7 +76,11 @@ impl Provider for Bar {
     }
 
     fn provide_mut<'a>(&'a mut self, req: &mut Requisition<'a>) {
-        req.provide_mut::<String>(&mut self.s);
+        //req.provide_mut::<String>(&mut self.s);
+        //req.provide_mut::<String, _>(|| &mut self.s).provide_mut::<Bar, _>(|| self);
+        req.within(self)
+            .provide::<String, _>(|this| &mut this.s)
+            .provide::<Bar, _>(|this| this);
     }
 }
 
@@ -87,7 +94,8 @@ fn foo() {
     let s: &String = f.get_ref().unwrap();
     assert_eq!(s, "Bob");
 
-    let s: &mut String = f.get_mut().unwrap();
-    s.push_str(" and Alice");
-    assert_eq!(b.s, "Bob and Alice");
+    // let s: &mut String = f.get_mut().unwrap();
+    // s.push_str(" and Alice");
+    // assert_eq!(b.s, "Bob and Alice");
+    let _b: &mut Bar = f.get_mut().unwrap();
 }
