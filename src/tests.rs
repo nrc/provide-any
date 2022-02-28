@@ -50,9 +50,9 @@ impl dyn Foo {
         provide_any::request_ref(self)
     }
 
-    // pub fn get_mut<T: ?Sized + 'static>(&mut self) -> Option<&mut T> {
-    //     provide_any::request_mut_by_type_tag::<'_, tags::RefMut<T>>(self)
-    // }
+    pub fn get_mut<T: ?Sized + 'static>(&mut self) -> Option<&mut T> {
+        provide_any::request_mut(self)
+    }
 }
 
 struct Bar {
@@ -66,13 +66,12 @@ impl Provider for Bar {
         req.provide_ref::<String>(&self.s);
     }
 
-    // fn provide_mut<'a>(&'a mut self, req: &mut Demand<'a>) {
-    //     //req.provide_mut::<String>(&mut self.s);
-    //     //req.provide_mut::<String, _>(|| &mut self.s).provide_mut::<Bar, _>(|| self);
-    //     req.within(self)
-    //         .provide::<String, _>(|this| &mut this.s)
-    //         .provide::<Bar, _>(|this| this);
-    // }
+    fn provide_mut<'a>(&'a mut self, req: &mut Demand<'a>) {
+        // req.provide_mut::<String>(&mut self.s);
+        req.with(self)
+            .provide_mut::<_, String>(|this| &mut this.s)
+            .provide_mut::<_, Bar>(|this| this);
+    }
 }
 
 #[test]
@@ -85,8 +84,8 @@ fn foo() {
     let s: &String = f.get_ref().unwrap();
     assert_eq!(s, "Bob");
 
-    // let s: &mut String = f.get_mut().unwrap();
-    // s.push_str(" and Alice");
-    // assert_eq!(b.s, "Bob and Alice");
-    // let _b: &mut Bar = f.get_mut().unwrap();
+    let s: &mut String = f.get_mut().unwrap();
+    s.push_str(" and Alice");
+    let _b: &mut Bar = f.get_mut().unwrap();
+    assert_eq!(b.s, "Bob and Alice");
 }

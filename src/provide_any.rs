@@ -37,7 +37,7 @@ pub trait Provider {
     /// Object providers should implement this method to provide *all* values they are able to
     /// provide using `req`.
     fn provide<'a>(&'a self, req: &mut Demand<'a>);
-    // fn provide_mut<'a>(&'a mut self, _req: &mut Demand<'a>) {}
+    fn provide_mut<'a>(&'a mut self, _req: &mut Demand<'a>) {}
 }
 
 pub fn request_value<'a, T: 'static>(provider: &'a dyn Provider) -> Option<T> {
@@ -46,6 +46,10 @@ pub fn request_value<'a, T: 'static>(provider: &'a dyn Provider) -> Option<T> {
 
 pub fn request_ref<'a, T: ?Sized + 'static>(provider: &'a dyn Provider) -> Option<&'a T> {
     request_by_type_tag::<'a, tags::Ref<tags::MaybeSizedValue<T>>>(provider)
+}
+
+pub fn request_mut<'a, T: ?Sized + 'static>(provider: &'a mut dyn Provider) -> Option<&'a mut T> {
+    request_mut_by_type_tag::<'a, tags::RefMut<tags::MaybeSizedValue<T>>>(provider)
 }
 
 /// Request a specific value by a given tag from the `Provider`.
@@ -58,14 +62,14 @@ where
     tagged.0
 }
 
-// fn request_mut_by_type_tag<'a, I>(provider: &'a mut dyn Provider) -> Option<I::Reified>
-// where
-//     I: tags::Type<'a>,
-// {
-//     let mut tagged = TaggedOption::<'a, I>(None);
-//     provider.provide_mut(tagged.as_demand());
-//     tagged.0
-// }
+fn request_mut_by_type_tag<'a, I>(provider: &'a mut dyn Provider) -> Option<I::Reified>
+where
+    I: tags::Type<'a>,
+{
+    let mut tagged = TaggedOption::<'a, I>(None);
+    provider.provide_mut(tagged.as_demand());
+    tagged.0
+}
 
 mod tags {
     //! Type tags are used to identify a type using a separate value. This module includes type tags
@@ -89,11 +93,11 @@ mod tags {
         type Reified: 'a;
     }
 
-    pub trait TypeComponent<'a>: Sized + 'static {
+    pub trait MaybeSizedType<'a>: Sized + 'static {
         type Reified: 'a + ?Sized;
     }
 
-    impl<'a, T: Type<'a>> TypeComponent<'a> for T {
+    impl<'a, T: Type<'a>> MaybeSizedType<'a> for T {
         type Reified = T::Reified;
     }
 
@@ -107,23 +111,23 @@ mod tags {
     /// Type-based `TypeTag` for static `T` types.
     pub struct MaybeSizedValue<T: ?Sized + 'static>(PhantomData<T>);
 
-    impl<'a, T: ?Sized + 'static> TypeComponent<'a> for MaybeSizedValue<T> {
+    impl<'a, T: ?Sized + 'static> MaybeSizedType<'a> for MaybeSizedValue<T> {
         type Reified = T;
     }
 
     /// Type-based `TypeTag` for `&'a T` types.
     pub struct Ref<I>(PhantomData<I>);
 
-    impl<'a, I: TypeComponent<'a>> Type<'a> for Ref<I> {
+    impl<'a, I: MaybeSizedType<'a>> Type<'a> for Ref<I> {
         type Reified = &'a I::Reified;
     }
 
-    // /// Type-based `TypeTag` for `&'a mut T` types.
-    // pub struct RefMut<I>(PhantomData<I>);
+    /// Type-based `TypeTag` for `&'a mut T` types.
+    pub struct RefMut<I>(PhantomData<I>);
 
-    // impl<'a, I: TypeComponent<'a>> Type<'a> for RefMut<I> {
-    //     type Reified = &'a mut I::Reified;
-    // }
+    impl<'a, I: MaybeSizedType<'a>> Type<'a> for RefMut<I> {
+        type Reified = &'a mut I::Reified;
+    }
 
     // /// Tag combinator to wrap the given tag's value in an `Option<T>`
     // pub struct Option<I>(PhantomData<I>);
@@ -161,13 +165,9 @@ impl<'a> Demand<'a> {
         self.provide::<tags::Ref<tags::MaybeSizedValue<T>>>(value)
     }
 
-    // pub fn provide_mut<T: ?Sized + 'static>(&mut self, f: F) -> &mut Self
-    // where
-    //     T: ?Sized + 'static,
-    //     F: FnOnce() -> &'a mut T,
-    // {
-    //     self.provide_with::<tags::RefMut<tags::MaybeSizedValue<T>>>(f)
-    // }
+    pub fn provide_mut<T: ?Sized + 'static>(&mut self, value: &'a mut T) -> &mut Self {
+        self.provide::<tags::RefMut<tags::MaybeSizedValue<T>>>(value)
+    }
 
     /// Provide a value with the given `TypeTag`.
     fn provide<I>(&mut self, value: I::Reified) -> &mut Self
@@ -192,24 +192,34 @@ impl<'a> Demand<'a> {
         self
     }
 
-    // pub fn within<C>(&mut self, cx: C) -> DemandWithin<'a, '_, C> {
-    //     DemandWithin {
-    //         cx,
-    //         demand: self,
-    //     }
-    // }
+    pub fn with<C>(&mut self, cx: C) -> DemandWith<'a, '_, C> {
+        DemandWith {
+            cx: Some(cx),
+            demand: self,
+        }
+    }
 }
 
-// pub struct DemandWithin<'a, 'b, C> {
-//     cx: C,
-//     demand: &'b mut Requisition<'a>,
-// }
+pub struct DemandWith<'a, 'b, C> {
+    cx: Option<C>,
+    demand: &'b mut Demand<'a>,
+}
 
-// impl<'a, C> DemandWithin<'a, '_, C> {
-//     pub fn provide<T: ?Sized + 'static, F: FnOnce(C) -> &'a mut T>(self, f: F) -> Self {
-//         todo!()
-//     }
-// }
+impl<'a, C> DemandWith<'a, '_, C> {
+    pub fn provide_mut<F, T: ?Sized + 'static>(&mut self, fulfill: F) -> &mut Self
+    where
+        F: FnOnce(C) -> &'a mut T,
+    {
+        if let Some(res @ TaggedOption(None)) = self
+            .demand
+            .0
+            .downcast_mut::<tags::RefMut<tags::MaybeSizedValue<T>>>()
+        {
+            res.0 = Some(fulfill(self.cx.take().unwrap()));
+        }
+        self
+    }
+}
 
 /// A concrete tagged value for a given tag `I`.
 ///
